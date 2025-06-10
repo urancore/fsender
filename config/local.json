@@ -1,0 +1,11 @@
+{
+	"server": {
+		"addr": ":1212"
+	},
+	"database": {
+		"path": "internal/storage/sqlite.db"
+	},
+	"ftp": {
+		"root": "FILES/"
+	}
+}
