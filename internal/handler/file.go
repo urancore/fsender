@@ -7,51 +7,63 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"text/template"
+	"html/template"
 )
 
 func (h *Handler) FileUploadHandler(w http.ResponseWriter, r *http.Request) {
-	// (максимум 10 МБ)
-	r.ParseMultipartForm(10 << 20)
-
-	subdir_save_file, err := utils.GenerateKey()
-	if err != nil {
-		http.Error(w, "File create error", http.StatusInternalServerError)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	file, handler, err := r.FormFile("file")
+	subdir, err := utils.GenerateKey()
 	if err != nil {
-		http.Error(w, "Error retrieving the file", http.StatusBadRequest)
+		http.Error(w, "Failed to generate directory", http.StatusInternalServerError)
 		return
 	}
-	defer file.Close()
 
-	// создаем полный путь к целевой директории
-	save_dir := filepath.Join(h.cfg.FTP.RootPath, subdir_save_file)
-
-	// создаем директорию со всеми родительскими папками при необходимости
-	if err := os.MkdirAll(save_dir, 0755); err != nil {
+	saveDir := filepath.Join(h.cfg.FTP.RootPath, subdir)
+	if err := os.MkdirAll(saveDir, 0755); err != nil {
 		http.Error(w, "Failed to create directory", http.StatusInternalServerError)
 		return
 	}
 
-	// создаем полный путь к файлу
-	filePath := filepath.Join(save_dir, handler.Filename)
-	dst, err := os.Create(filePath)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer dst.Close()
-
-	// копируем содержимое файла
-	if _, err := io.Copy(dst, file); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	files := r.MultipartForm.File["files"]
+	if len(files) == 0 {
+		http.Error(w, "No files uploaded", http.StatusBadRequest)
 		return
 	}
 
-	fmt.Fprintf(w, "File uploaded successfully: %s / link: http://26.199.90.194:1212/f/%s", handler.Filename, subdir_save_file)
+	for _, fileHeader := range files {
+
+		file, err := fileHeader.Open()
+		if err != nil {
+			http.Error(w, "Error retrieving file", http.StatusBadRequest)
+			return
+		}
+
+
+		filePath := filepath.Join(saveDir, fileHeader.Filename)
+		dst, err := os.Create(filePath)
+		if err != nil {
+			file.Close()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if _, err := io.Copy(dst, file); err != nil {
+			file.Close()
+			dst.Close()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		file.Close()
+		dst.Close()
+	}
+	ip := h.cfg.Server.Addr
+	fmt.Fprintf(w, "Files uploaded successfully. Link: %s/f/%s", ip, subdir)
 }
 
 func (h *Handler) HandleIndexPage(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +80,8 @@ func (h *Handler) GetFileByLink(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	path := filepath.Join(h.cfg.FTP.RootPath + key)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		http.Error(w, "Page Not Found", http.StatusNotFound)
+		http.Error(w, "Page Not Found 404", http.StatusNotFound)
+		return
 	}
 
 	funcMap := template.FuncMap{
@@ -84,11 +97,13 @@ func (h *Handler) GetFileByLink(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := tmpl.ParseFiles("templates/load_page.html")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	files, err := utils.ReadDir(path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	data := struct {
@@ -106,13 +121,11 @@ func (h *Handler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	filename := r.PathValue("filename")
 	filePath := filepath.Join(h.cfg.FTP.RootPath, key, filename)
 
-	// Проверка существования файла
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		http.Error(w, "File not found", http.StatusNotFound)
 		return
 	}
 
-	// Устанавливаем заголовки для скачивания
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	http.ServeFile(w, r, filePath)
 }

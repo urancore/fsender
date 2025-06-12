@@ -42,6 +42,16 @@
 			background-color: rgba(33, 150, 243, 0.05);
 		}
 
+		.response-message {
+			margin-top: 1rem;
+			color: #2196F3;
+			word-break: break-all;
+			padding: 10px;
+			border-radius: 5px;
+			background: #e3f2fd;
+		}
+
+
 		#file-input {
 			display: none;
 		}
@@ -87,10 +97,11 @@
 			<div class="preview-text">
 				Перетащите файлы или кликните для выбора
 			</div>
-			<input type="file" name="file" id="file-input" multiple>
+			<input type="file" name="files" id="file-input" multiple>
 		</div>
 		<div class="file-list" id="fileList"></div>
 		<button class="upload-btn" type="submit">Загрузить</button>
+		<div id="response" class="response-message"></div>
 	</form>
 
 	<script>
@@ -121,10 +132,55 @@
 			fileInput.click();
 		});
 
-		// Выбор файлов через диалог
 		fileInput.addEventListener('change', (e) => {
 			handleFiles(e.target.files);
 		});
+
+		document.querySelector('form').addEventListener('submit', (e) => {
+			e.preventDefault();
+			const btn = document.querySelector('.upload-btn');
+			btn.disabled = true;
+			btn.textContent = 'Загрузка...';
+
+			const formData = new FormData(e.target);
+
+			fetch(e.target.action, {
+				method: 'POST',
+				body: formData
+			})
+				.then(response => {
+					if (!response.ok) {
+						return response.text().then(text => {
+							throw new Error(text || 'Ошибка сервера');
+						});
+					}
+					return response.text();
+				})
+				.then(text => {
+					const linkText = text.split('Link: ')[1];
+					const responseDiv = document.getElementById('response');
+					responseDiv.innerHTML = '';
+
+					if (linkText) {
+						const link = document.createElement('a');
+						link.href = linkText;
+						link.textContent = linkText;
+						link.target = '_blank';
+						responseDiv.appendChild(link);
+					} else {
+						responseDiv.textContent = 'Ссылка не найдена в ответе сервера';
+					}
+				})
+				.catch(error => {
+					const responseDiv = document.getElementById('response');
+					responseDiv.textContent = 'Ошибка: ' + error.message;
+				})
+				.finally(() => {
+					btn.disabled = false;
+					btn.textContent = 'Загрузить';
+				});
+		});
+
 
 		function handleFiles(files) {
 			fileList.innerHTML = '';
